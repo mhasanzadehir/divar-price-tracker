@@ -8,6 +8,10 @@ from datetime import datetime, timedelta
 import random
 
 def add_sample_data(db_path='price_data.db'):
+    # First initialize the database using the scraper
+    from scraper import DivarScraper
+    scraper = DivarScraper(db_path)
+
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
@@ -23,6 +27,7 @@ def add_sample_data(db_path='price_data.db'):
 
     areas = [70, 85, 95, 105, 120, 140, 160]
     rooms = [1, 2, 2, 3, 3]
+    building_ages = [0, 2, 5, 8, 10, 15, 20, 25]
 
     listings_added = 0
 
@@ -31,6 +36,7 @@ def add_sample_data(db_path='price_data.db'):
         token = f"sample_{i}_{datetime.now().timestamp()}"
         area = random.choice(areas)
         room = random.choice(rooms)
+        building_age = random.choice(building_ages)
         price = random.choice(base_prices) + random.randint(-2000000000, 2000000000)
         price_per_sqm = price / area
 
@@ -40,11 +46,11 @@ def add_sample_data(db_path='price_data.db'):
             cursor.execute('''
                 INSERT OR IGNORE INTO listings (
                     listing_token, title, price, price_per_sqm, area, rooms,
-                    district, neighborhood
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    district, neighborhood, building_age
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 token, title, price, price_per_sqm, area, room,
-                'دروازه شمیران', 'darvazeh-shemiran'
+                'دروازه شمیران', 'darvazeh-shemiran', building_age
             ))
 
             cursor.execute('''
