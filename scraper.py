@@ -4,13 +4,18 @@ import sqlite3
 from datetime import datetime
 from typing import List, Dict
 import time
+import re
+from bs4 import BeautifulSoup
 
 class DivarScraper:
     def __init__(self, db_path='price_data.db'):
-        self.base_url = "https://api.divar.ir/v8/web-search/tehran/buy-apartment"
+        self.page_url = "https://divar.ir/s/tehran/buy-apartment/darvazeh-shemiran"
         self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
         }
         self.db_path = db_path
         self.init_database()
@@ -65,177 +70,237 @@ class DivarScraper:
         conn.commit()
         conn.close()
 
-    def scrape_listings(self, neighborhood='darvazeh-shemiran', max_pages=5):
-        """Scrape apartment listings from Divar"""
+    def scrape_listings(self, neighborhood='darvazeh-shemiran'):
+        """Scrape apartment listings from Divar by parsing HTML"""
         all_listings = []
-        page = 0
-        last_post_date = None
 
-        while page < max_pages:
-            params = {
-                'districts': '1',
-            }
+        try:
+            response = requests.get(self.page_url, headers=self.headers, timeout=30)
+            response.raise_for_status()
 
-            if neighborhood:
-                params['neighborhoods'] = neighborhood
+            # Extract JSON data from the page
+            html_content = response.text
 
-            if last_post_date:
-                params['last-post-date'] = last_post_date
+            # Find the preloaded state in the HTML
+            match = re.search(r'window\.__PRELOADED_STATE__\s*=\s*({.*?});', html_content, re.DOTALL)
 
-            try:
-                response = requests.get(self.base_url, headers=self.headers, params=params)
-                response.raise_for_status()
-                data = response.json()
+            if match:
+                try:
+                    preloaded_data = json.loads(match.group(1))
 
-                if 'web_widgets' not in data or 'list_data' not in data['web_widgets']:
-                    break
+                    # Navigate through the JSON structure to find listings
+                    if 'slist' in preloaded_data:
+                        slist_data = preloaded_data['slist']
 
-                widgets = data['web_widgets']['list_data']
+                        # Look for posts in the data
+                        if 'data' in slist_data and 'widget_list' in slist_data['data']:
+                            widgets = slist_data['data']['widget_list']
 
-                for widget in widgets:
-                    if widget.get('widget_type') == 'POST_ROW':
-                        listing_data = self.parse_listing(widget['data'])
-                        if listing_data:
-                            all_listings.append(listing_data)
+                            for widget in widgets:
+                                if widget.get('widget_type') == 'POST_ROW':
+                                    listing_data = self.parse_widget(widget.get('data', {}))
+                                    if listing_data and listing_data.get('price'):
+                                        all_listings.append(listing_data)
 
-                # Check if there's a next page
-                last_post_date = data.get('last_post_date')
-                if not last_post_date or not widgets:
-                    break
+                    # Also try alternative structure
+                    if not all_listings and 'search' in preloaded_data:
+                        search_data = preloaded_data.get('search', {})
+                        if 'widgetList' in search_data:
+                            for widget in search_data['widgetList']:
+                                if widget.get('widget_type') == 'POST_ROW':
+                                    listing_data = self.parse_widget(widget.get('data', {}))
+                                    if listing_data and listing_data.get('price'):
+                                        all_listings.append(listing_data)
 
-                page += 1
-                time.sleep(1)  # Be respectful to the server
+                except json.JSONDecodeError as e:
+                    print(f"Error parsing JSON: {e}")
 
-            except Exception as e:
-                print(f"Error scraping page {page}: {e}")
-                break
+            # If no listings found, try BeautifulSoup parsing
+            if not all_listings:
+                all_listings = self.parse_html_fallback(html_content)
+
+        except Exception as e:
+            print(f"Error scraping page: {e}")
 
         return all_listings
 
-    def parse_listing(self, widget_data):
+    def parse_widget(self, widget_data):
         """Parse listing data from widget"""
         try:
             listing = {
-                'token': widget_data.get('token'),
+                'token': widget_data.get('token', ''),
                 'title': widget_data.get('title', ''),
                 'price': None,
                 'price_per_sqm': None,
                 'area': None,
                 'rooms': None,
-                'district': None,
-                'neighborhood': None,
+                'district': 'دروازه شمیران',
+                'neighborhood': 'darvazeh-shemiran',
             }
-
-            # Extract data from middle_description_text
-            if 'middle_description_text' in widget_data:
-                desc_parts = widget_data['middle_description_text'].split('•')
-                for part in desc_parts:
-                    part = part.strip()
-                    if 'متر' in part and listing['area'] is None:
-                        try:
-                            listing['area'] = float(part.replace('متر', '').strip())
-                        except:
-                            pass
-                    elif 'اتاق' in part:
-                        try:
-                            listing['rooms'] = int(part.replace('اتاق', '').strip())
-                        except:
-                            pass
 
             # Extract price from top_description_text
             if 'top_description_text' in widget_data:
                 price_text = widget_data['top_description_text']
-                if 'تومان' in price_text:
-                    try:
-                        # Remove commas and extract number
-                        price_str = price_text.replace('تومان', '').replace(',', '').strip()
-                        listing['price'] = float(price_str)
+                listing['price'] = self.extract_price(price_text)
 
-                        # Calculate price per square meter
-                        if listing['area'] and listing['area'] > 0:
-                            listing['price_per_sqm'] = listing['price'] / listing['area']
-                    except:
-                        pass
+            # Extract details from middle_description_text
+            if 'middle_description_text' in widget_data:
+                desc_text = widget_data['middle_description_text']
+
+                # Extract area
+                area_match = re.search(r'(\d+)\s*متر', desc_text)
+                if area_match:
+                    listing['area'] = float(area_match.group(1))
+
+                # Extract rooms
+                room_match = re.search(r'(\d+)\s*اتاق', desc_text)
+                if room_match:
+                    listing['rooms'] = int(room_match.group(1))
+
+            # Calculate price per sqm
+            if listing['price'] and listing['area'] and listing['area'] > 0:
+                listing['price_per_sqm'] = listing['price'] / listing['area']
 
             return listing if listing['token'] else None
 
         except Exception as e:
-            print(f"Error parsing listing: {e}")
+            print(f"Error parsing widget: {e}")
             return None
+
+    def extract_price(self, text):
+        """Extract numeric price from Persian text"""
+        if not text:
+            return None
+
+        try:
+            # Remove 'تومان' and commas
+            text = text.replace('تومان', '').replace(',', '').strip()
+
+            # Handle millions (میلیون)
+            if 'میلیون' in text:
+                num_match = re.search(r'([\d.]+)', text)
+                if num_match:
+                    return float(num_match.group(1)) * 1000000
+
+            # Handle billions (میلیارد)
+            if 'میلیارد' in text:
+                num_match = re.search(r'([\d.]+)', text)
+                if num_match:
+                    return float(num_match.group(1)) * 1000000000
+
+            # Direct number
+            num_match = re.search(r'([\d]+)', text)
+            if num_match:
+                return float(num_match.group(1))
+
+        except Exception as e:
+            print(f"Error extracting price from '{text}': {e}")
+
+        return None
+
+    def parse_html_fallback(self, html_content):
+        """Fallback method using BeautifulSoup if JSON extraction fails"""
+        listings = []
+
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+
+            # This is a basic fallback - you may need to adjust selectors based on actual HTML structure
+            # For now, we'll return empty as we'd need to inspect the actual HTML
+            print("Using HTML fallback parser...")
+
+        except Exception as e:
+            print(f"Error in HTML fallback: {e}")
+
+        return listings
 
     def save_listings(self, listings: List[Dict]):
         """Save listings to database"""
+        if not listings:
+            print("No listings to save")
+            return
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        today = datetime.now().date()
 
+        saved_count = 0
         for listing in listings:
             if not listing.get('price'):
                 continue
 
-            # Insert or update listing
-            cursor.execute('''
-                INSERT OR IGNORE INTO listings (
-                    listing_token, title, price, price_per_sqm, area, rooms, district, neighborhood
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                listing['token'],
-                listing['title'],
-                listing['price'],
-                listing['price_per_sqm'],
-                listing['area'],
-                listing['rooms'],
-                listing.get('district'),
-                listing.get('neighborhood')
-            ))
+            try:
+                # Insert or update listing
+                cursor.execute('''
+                    INSERT OR IGNORE INTO listings (
+                        listing_token, title, price, price_per_sqm, area, rooms, district, neighborhood
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    listing['token'],
+                    listing['title'],
+                    listing['price'],
+                    listing['price_per_sqm'],
+                    listing['area'],
+                    listing['rooms'],
+                    listing.get('district'),
+                    listing.get('neighborhood')
+                ))
 
-            # Add to price history
-            cursor.execute('''
-                INSERT INTO price_history (listing_token, price, price_per_sqm)
-                VALUES (?, ?, ?)
-            ''', (
-                listing['token'],
-                listing['price'],
-                listing['price_per_sqm']
-            ))
+                # Add to price history
+                cursor.execute('''
+                    INSERT INTO price_history (listing_token, price, price_per_sqm)
+                    VALUES (?, ?, ?)
+                ''', (
+                    listing['token'],
+                    listing['price'],
+                    listing['price_per_sqm']
+                ))
+
+                saved_count += 1
+
+            except Exception as e:
+                print(f"Error saving listing: {e}")
+                continue
 
         conn.commit()
 
         # Calculate daily statistics
-        cursor.execute('''
-            INSERT OR REPLACE INTO daily_stats (
-                date, avg_price, median_price, avg_price_per_sqm,
-                median_price_per_sqm, total_listings, min_price, max_price
-            )
-            SELECT
-                DATE('now') as date,
-                AVG(price) as avg_price,
-                (SELECT AVG(price) FROM (
-                    SELECT price FROM price_history
-                    WHERE DATE(scraped_at) = DATE('now')
-                    ORDER BY price
-                    LIMIT 2 - (SELECT COUNT(*) FROM price_history WHERE DATE(scraped_at) = DATE('now')) % 2
-                    OFFSET (SELECT (COUNT(*) - 1) / 2 FROM price_history WHERE DATE(scraped_at) = DATE('now'))
-                )) as median_price,
-                AVG(price_per_sqm) as avg_price_per_sqm,
-                (SELECT AVG(price_per_sqm) FROM (
-                    SELECT price_per_sqm FROM price_history
-                    WHERE DATE(scraped_at) = DATE('now') AND price_per_sqm IS NOT NULL
-                    ORDER BY price_per_sqm
-                    LIMIT 2 - (SELECT COUNT(*) FROM price_history WHERE DATE(scraped_at) = DATE('now') AND price_per_sqm IS NOT NULL) % 2
-                    OFFSET (SELECT (COUNT(*) - 1) / 2 FROM price_history WHERE DATE(scraped_at) = DATE('now') AND price_per_sqm IS NOT NULL)
-                )) as median_price_per_sqm,
-                COUNT(*) as total_listings,
-                MIN(price) as min_price,
-                MAX(price) as max_price
-            FROM price_history
-            WHERE DATE(scraped_at) = DATE('now')
-        ''')
+        try:
+            cursor.execute('''
+                INSERT OR REPLACE INTO daily_stats (
+                    date, avg_price, median_price, avg_price_per_sqm,
+                    median_price_per_sqm, total_listings, min_price, max_price
+                )
+                SELECT
+                    DATE('now') as date,
+                    AVG(price) as avg_price,
+                    (SELECT AVG(price) FROM (
+                        SELECT price FROM price_history
+                        WHERE DATE(scraped_at) = DATE('now')
+                        ORDER BY price
+                        LIMIT 2 - (SELECT COUNT(*) FROM price_history WHERE DATE(scraped_at) = DATE('now')) % 2
+                        OFFSET (SELECT (COUNT(*) - 1) / 2 FROM price_history WHERE DATE(scraped_at) = DATE('now'))
+                    )) as median_price,
+                    AVG(price_per_sqm) as avg_price_per_sqm,
+                    (SELECT AVG(price_per_sqm) FROM (
+                        SELECT price_per_sqm FROM price_history
+                        WHERE DATE(scraped_at) = DATE('now') AND price_per_sqm IS NOT NULL
+                        ORDER BY price_per_sqm
+                        LIMIT 2 - (SELECT COUNT(*) FROM price_history WHERE DATE(scraped_at) = DATE('now') AND price_per_sqm IS NOT NULL) % 2
+                        OFFSET (SELECT (COUNT(*) - 1) / 2 FROM price_history WHERE DATE(scraped_at) = DATE('now') AND price_per_sqm IS NOT NULL)
+                    )) as median_price_per_sqm,
+                    COUNT(*) as total_listings,
+                    MIN(price) as min_price,
+                    MAX(price) as max_price
+                FROM price_history
+                WHERE DATE(scraped_at) = DATE('now')
+            ''')
+            conn.commit()
+        except Exception as e:
+            print(f"Error calculating stats: {e}")
 
-        conn.commit()
         conn.close()
 
-        print(f"Saved {len(listings)} listings to database")
+        print(f"Saved {saved_count} listings to database")
 
     def run(self, neighborhood='darvazeh-shemiran'):
         """Run the scraper"""
@@ -247,7 +312,8 @@ class DivarScraper:
             self.save_listings(listings)
             print("Data saved successfully")
         else:
-            print("No listings found")
+            print("No listings found - this might be due to Divar's anti-scraping measures")
+            print("Consider using the scraper at different times or with delays")
 
 if __name__ == '__main__':
     scraper = DivarScraper()
