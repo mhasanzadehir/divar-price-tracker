@@ -6,6 +6,7 @@ Run this to populate the database with sample apartment listings
 import sqlite3
 from datetime import datetime, timedelta
 import random
+import string
 
 def add_sample_data(db_path='price_data.db'):
     # First initialize the database using the scraper
@@ -38,7 +39,9 @@ def add_sample_data(db_path='price_data.db'):
 
     # Create sample listings
     for i in range(20):
-        token = f"sample_{i}_{int(datetime.now().timestamp())}"
+        # Generate realistic Divar-style token (8 characters, alphanumeric)
+        # Real Divar tokens look like: gas0v9jp, gapA2K0f, etc.
+        token = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
         area = random.choice(areas)
         room = random.choice(rooms)
         building_age = random.choice(building_ages)

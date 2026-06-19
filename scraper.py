@@ -153,6 +153,8 @@ class DivarScraper:
                 'rooms': None,
                 'district': 'دروازه شمیران',
                 'neighborhood': 'darvazeh-shemiran',
+                # Divar URLs are in format: https://divar.ir/v/TOKEN/apartment-title
+                # We'll use a simple format without title for now
                 'url': f"https://divar.ir/v/{widget_data.get('token', '')}" if widget_data.get('token') else None,
                 'latitude': None,
                 'longitude': None,
