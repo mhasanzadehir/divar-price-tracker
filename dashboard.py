@@ -515,25 +515,30 @@ class PriceDashboard:
 
             # Format the dataframe for display
             display_df = current_listings.copy()
-            display_df['price'] = display_df['price'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "N/A")
-            display_df['price_per_sqm'] = display_df['price_per_sqm'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "N/A")
-            display_df['area'] = display_df['area'].apply(lambda x: f"{x:.0f}" if pd.notnull(x) else "N/A")
-            display_df['building_age'] = display_df['building_age'].apply(lambda x: f"{x:.0f} years" if pd.notnull(x) else "N/A")
+
+            # Format numeric columns (but NOT the url column)
+            display_df['price_formatted'] = display_df['price'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "N/A")
+            display_df['price_per_sqm_formatted'] = display_df['price_per_sqm'].apply(lambda x: f"{x:,.0f}" if pd.notnull(x) else "N/A")
+            display_df['area_formatted'] = display_df['area'].apply(lambda x: f"{x:.0f}" if pd.notnull(x) else "N/A")
+            display_df['building_age_formatted'] = display_df['building_age'].apply(lambda x: f"{x:.0f} years" if pd.notnull(x) else "N/A")
+
+            # Select and reorder columns for display
+            display_columns = ['title', 'price_formatted', 'price_per_sqm_formatted', 'area_formatted',
+                             'rooms', 'building_age_formatted', 'url', 'last_seen']
+            display_df = display_df[display_columns]
 
             st.dataframe(
                 display_df,
                 column_config={
                     "title": "Title",
-                    "price": "Price (تومان)",
-                    "price_per_sqm": "Price/m² (تومان)",
-                    "area": "Area (m²)",
+                    "price_formatted": "Price (تومان)",
+                    "price_per_sqm_formatted": "Price/m² (تومان)",
+                    "area_formatted": "Area (m²)",
                     "rooms": "Rooms",
-                    "building_age": "Building Age",
-                    "neighborhood": "Neighborhood",
+                    "building_age_formatted": "Building Age",
                     "url": st.column_config.LinkColumn(
                         "Divar Link",
-                        help="Click to view on Divar",
-                        display_text="View on Divar"
+                        help="Click to view on Divar"
                     ),
                     "last_seen": "Last Seen"
                 },
