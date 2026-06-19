@@ -38,9 +38,26 @@ class DivarScraper:
                 neighborhood TEXT,
                 floor INTEGER,
                 building_age INTEGER,
+                url TEXT,
+                latitude REAL,
+                longitude REAL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        # Add URL and coordinates columns if they don't exist (for existing databases)
+        try:
+            cursor.execute('ALTER TABLE listings ADD COLUMN url TEXT')
+        except:
+            pass
+        try:
+            cursor.execute('ALTER TABLE listings ADD COLUMN latitude REAL')
+        except:
+            pass
+        try:
+            cursor.execute('ALTER TABLE listings ADD COLUMN longitude REAL')
+        except:
+            pass
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS price_history (
@@ -136,6 +153,9 @@ class DivarScraper:
                 'rooms': None,
                 'district': 'دروازه شمیران',
                 'neighborhood': 'darvazeh-shemiran',
+                'url': f"https://divar.ir/v/{widget_data.get('token', '')}" if widget_data.get('token') else None,
+                'latitude': None,
+                'longitude': None,
             }
 
             # Extract price from top_description_text
@@ -232,8 +252,9 @@ class DivarScraper:
                 # Insert or update listing
                 cursor.execute('''
                     INSERT OR IGNORE INTO listings (
-                        listing_token, title, price, price_per_sqm, area, rooms, district, neighborhood
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        listing_token, title, price, price_per_sqm, area, rooms, district, neighborhood,
+                        url, latitude, longitude
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     listing['token'],
                     listing['title'],
@@ -242,7 +263,10 @@ class DivarScraper:
                     listing['area'],
                     listing['rooms'],
                     listing.get('district'),
-                    listing.get('neighborhood')
+                    listing.get('neighborhood'),
+                    listing.get('url'),
+                    listing.get('latitude'),
+                    listing.get('longitude')
                 ))
 
                 # Add to price history

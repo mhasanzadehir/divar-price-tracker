@@ -31,26 +31,36 @@ def add_sample_data(db_path='price_data.db'):
 
     listings_added = 0
 
+    # Darvazeh Shemiran approximate coordinates: 35.7456°N, 51.4215°E
+    # Generate random coordinates within the neighborhood
+    base_lat = 35.7456
+    base_lon = 51.4215
+
     # Create sample listings
     for i in range(20):
-        token = f"sample_{i}_{datetime.now().timestamp()}"
+        token = f"sample_{i}_{int(datetime.now().timestamp())}"
         area = random.choice(areas)
         room = random.choice(rooms)
         building_age = random.choice(building_ages)
         price = random.choice(base_prices) + random.randint(-2000000000, 2000000000)
         price_per_sqm = price / area
 
+        # Generate random coordinates within ~1km radius
+        lat = base_lat + random.uniform(-0.008, 0.008)
+        lon = base_lon + random.uniform(-0.01, 0.01)
+
         title = f"آپارتمان {area} متری {room} خوابه - دروازه شمیران"
+        url = f"https://divar.ir/v/{token}"
 
         try:
             cursor.execute('''
                 INSERT OR IGNORE INTO listings (
                     listing_token, title, price, price_per_sqm, area, rooms,
-                    district, neighborhood, building_age
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    district, neighborhood, building_age, url, latitude, longitude
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 token, title, price, price_per_sqm, area, room,
-                'دروازه شمیران', 'darvazeh-shemiran', building_age
+                'دروازه شمیران', 'darvazeh-shemiran', building_age, url, lat, lon
             ))
 
             cursor.execute('''

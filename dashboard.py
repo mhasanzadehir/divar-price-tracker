@@ -6,6 +6,8 @@ import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import os
 from scraper import DivarScraper
+import folium
+from streamlit_folium import st_folium
 
 class PriceDashboard:
     def __init__(self, db_path='price_data.db'):
@@ -113,6 +115,9 @@ class PriceDashboard:
                 l.rooms,
                 l.building_age,
                 l.neighborhood,
+                l.url,
+                l.latitude,
+                l.longitude,
                 MAX(ph.scraped_at) as last_seen
             FROM listings l
             LEFT JOIN price_history ph ON l.listing_token = ph.listing_token
@@ -419,6 +424,68 @@ class PriceDashboard:
                 fig.update_layout(height=400)
                 st.plotly_chart(fig, use_container_width=True)
 
+        # Map visualization
+        st.header("🗺️ Listings Map")
+
+        # Filter listings with valid coordinates
+        map_listings = current_listings[(current_listings['latitude'].notna()) & (current_listings['longitude'].notna())]
+
+        if not map_listings.empty:
+            # Create map centered on Darvazeh Shemiran
+            center_lat = map_listings['latitude'].mean()
+            center_lon = map_listings['longitude'].mean()
+
+            m = folium.Map(location=[center_lat, center_lon], zoom_start=14)
+
+            # Add markers for each listing
+            for idx, row in map_listings.iterrows():
+                # Create popup content
+                popup_html = f"""
+                <div style="width: 200px">
+                    <h4>{row['title']}</h4>
+                    <p><b>Price:</b> {row['price']:,.0f} تومان</p>
+                    <p><b>Area:</b> {row['area']:.0f} m²</p>
+                    <p><b>Rooms:</b> {row['rooms']}</p>
+                    <p><b>Price/m²:</b> {row['price_per_sqm']:,.0f} تومان</p>
+                    <p><a href="{row['url']}" target="_blank">View on Divar</a></p>
+                </div>
+                """
+
+                # Color code by price
+                if row['price'] < 15000000000:
+                    color = 'green'
+                elif row['price'] < 20000000000:
+                    color = 'blue'
+                elif row['price'] < 25000000000:
+                    color = 'orange'
+                else:
+                    color = 'red'
+
+                folium.Marker(
+                    location=[row['latitude'], row['longitude']],
+                    popup=folium.Popup(popup_html, max_width=250),
+                    tooltip=f"{row['price']:,.0f} تومان - {row['area']:.0f}m²",
+                    icon=folium.Icon(color=color, icon='home', prefix='fa')
+                ).add_to(m)
+
+            # Display map
+            st_folium(m, width=None, height=500)
+
+            # Legend
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.markdown("🟢 **< 15B Toman**")
+            with col2:
+                st.markdown("🔵 **15-20B Toman**")
+            with col3:
+                st.markdown("🟠 **20-25B Toman**")
+            with col4:
+                st.markdown("🔴 **> 25B Toman**")
+        else:
+            st.info("No listings with location data available")
+
+        st.markdown("---")
+
         # Current listings
         st.header("🏘️ Current Listings")
 
@@ -463,6 +530,11 @@ class PriceDashboard:
                     "rooms": "Rooms",
                     "building_age": "Building Age",
                     "neighborhood": "Neighborhood",
+                    "url": st.column_config.LinkColumn(
+                        "Divar Link",
+                        help="Click to view on Divar",
+                        display_text="View on Divar"
+                    ),
                     "last_seen": "Last Seen"
                 },
                 hide_index=True,
