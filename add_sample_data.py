@@ -32,10 +32,10 @@ def add_sample_data(db_path='price_data.db'):
 
     listings_added = 0
 
-    # Darvazeh Shemiran (district 13, north Tehran) correct coordinates
-    # Located near Tajrish, north of Tehran
-    base_lat = 35.8033  # Correct latitude for Darvazeh Shemiran
-    base_lon = 51.4297  # Correct longitude for Darvazeh Shemiran
+    # Darvazeh Shemiran - Near Shohada Square (Meydan-e Shohada)
+    # District 13, north-central Tehran
+    base_lat = 35.7322  # Correct latitude for Darvazeh Shemiran (Shohada Square area)
+    base_lon = 51.4114  # Correct longitude for Darvazeh Shemiran
 
     # Create sample listings
     for i in range(20):
